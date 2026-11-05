@@ -672,10 +672,13 @@ class SessionDB:
             )
             numbered = cursor.fetchall()
 
-        if numbered:
-            # Return the most recent numbered variant
-            return numbered[0]["id"]
-        elif exact:
+        # LIKE is only a candidate search: it also admits arbitrary text after
+        # the hash, nested suffixes, and case-insensitive title matches.
+        lineage = re.compile(re.escape(title) + r" #\d+")
+        for row in numbered:
+            if lineage.fullmatch(row["title"]):
+                return row["id"]
+        if exact:
             return exact["id"]
         return None
 
@@ -702,16 +705,18 @@ class SessionDB:
             )
             existing = [row["title"] for row in cursor.fetchall()]
 
-        if not existing:
+        # Verify exact base identity and the entire numeric suffix, just as
+        # resolution does; a different title must not consume a lineage number.
+        lineage = re.compile(re.escape(base) + r" #(\d+)")
+        numbers = [
+            int(match.group(1))
+            for candidate in existing
+            if (match := lineage.fullmatch(candidate))
+        ]
+        if base not in existing and not numbers:
             return base  # No conflict, use the base name as-is
 
-        # Find the highest number
-        max_num = 1  # The unnumbered original counts as #1
-        for t in existing:
-            m = re.match(r'^.* #(\d+)$', t)
-            if m:
-                max_num = max(max_num, int(m.group(1)))
-
+        max_num = max([1, *numbers])  # The unnumbered original counts as #1
         return f"{base} #{max_num + 1}"
 
     def list_sessions_rich(
